@@ -2091,7 +2091,6 @@ export interface DiskPressureStatus {
   used_percent?: number | null;
 }
 
-<<<<<<< HEAD
 export interface ChatWorkspaceProject {
   id: string;
   slug: string;
