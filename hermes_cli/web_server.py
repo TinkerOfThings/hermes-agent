@@ -4009,6 +4009,124 @@ def _display_system_platform(
     }
 
 
+# --- Unified health panel --------------------------------------------------
+# Short TTL cache for the (blocking) LM Studio reachability probe so a periodic
+# health poll doesn't hammer it.
+_LMSTUDIO_HEALTH_CACHE: dict = {"at": 0.0, "value": None}
+_LMSTUDIO_HEALTH_TTL = 15.0
+
+
+def _lmstudio_health_check() -> Optional[dict]:
+    """Probe LM Studio reachability — only when it's the configured provider.
+
+    Returns None (omit from the panel) when LM Studio isn't the active provider,
+    so users on other providers don't see a spurious 'unreachable' row. Result
+    is cached briefly. Runs blocking I/O; call it via an executor.
+    """
+    import time as _t
+    try:
+        model_cfg = (load_config() or {}).get("model") or {}
+    except Exception:
+        model_cfg = {}
+    if str(model_cfg.get("provider") or "").strip().lower() != "lmstudio":
+        return None
+
+    now = _t.monotonic()
+    cached = _LMSTUDIO_HEALTH_CACHE
+    if cached["value"] is not None and (now - cached["at"]) < _LMSTUDIO_HEALTH_TTL:
+        return cached["value"]
+
+    base = (
+        model_cfg.get("base_url")
+        or os.environ.get("LM_BASE_URL")
+        or "http://127.0.0.1:1234/v1"
+    )
+    try:
+        from hermes_cli.models import probe_lmstudio_models
+
+        models = probe_lmstudio_models(
+            api_key=os.environ.get("LM_API_KEY") or "", base_url=base, timeout=1.5
+        )
+        if models is None:
+            result = {"status": "down", "base_url": base, "detail": "unreachable"}
+        else:
+            result = {"status": "up", "base_url": base, "models": len(models)}
+    except Exception as e:  # AuthError (auth rejected) or connection failure
+        result = {"status": "down", "base_url": base, "detail": str(e)[:120]}
+
+    cached["at"] = now
+    cached["value"] = result
+    return result
+
+
+@app.get("/api/health")
+async def get_health():
+    """Aggregated subsystem health for the dashboard health panel.
+
+    Each check is independent and best-effort: a failing probe degrades that
+    one entry to status 'unknown' rather than failing the whole endpoint.
+    LM Studio is included only when it's the active provider. (Kanban-worker
+    health and UI-build staleness are tracked separately and will be folded in
+    next.)
+    """
+    checks: dict = {}
+
+    # Gateway + agent liveness.
+    try:
+        gw_pid = get_running_pid()
+        runtime = read_runtime_status() or {}
+        checks["gateway"] = {
+            "status": "up" if gw_pid is not None else "down",
+            "pid": gw_pid,
+            "state": runtime.get("gateway_state"),
+        }
+    except Exception as e:
+        checks["gateway"] = {"status": "unknown", "error": str(e)[:200]}
+
+    # Platform pollers (telegram, etc.) from the gateway runtime status.
+    try:
+        platforms = (read_runtime_status() or {}).get("platforms") or {}
+        for name, rec in platforms.items():
+            if not isinstance(rec, dict):
+                continue
+            state = str(rec.get("state") or "").lower()
+            status = (
+                "up" if state == "connected"
+                else "down" if state in {"disconnected", "fatal"}
+                else "unknown"
+            )
+            checks[f"platform:{name}"] = {
+                "status": status,
+                "state": rec.get("state"),
+                "updated_at": rec.get("updated_at"),
+                "error": rec.get("error_message"),
+            }
+    except Exception as e:
+        checks["platforms"] = {"status": "unknown", "error": str(e)[:200]}
+
+    # Live PTY sessions (keep-alive chat terminals).
+    try:
+        checks["pty_sessions"] = {
+            "status": "ok",
+            "live": PTY_REGISTRY.live_count(),
+            "total": len(PTY_REGISTRY.snapshot()),
+        }
+    except Exception as e:
+        checks["pty_sessions"] = {"status": "unknown", "error": str(e)[:200]}
+
+    # LM Studio reachability (only when it's the active provider).
+    try:
+        loop = asyncio.get_running_loop()
+        lm = await loop.run_in_executor(None, _lmstudio_health_check)
+        if lm is not None:
+            checks["lmstudio"] = lm
+    except Exception as e:
+        checks["lmstudio"] = {"status": "unknown", "error": str(e)[:200]}
+
+    overall_ok = all(c.get("status") != "down" for c in checks.values())
+    return {"ok": overall_ok, "checks": checks}
+
+
 @app.get("/api/system/stats")
 async def get_system_stats():
     """Host + process system stats for the System page.
