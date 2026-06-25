@@ -414,6 +414,7 @@ function appendSessionFilters(url: string, options: SessionQueryOptions): string
 export const api = {
   buildWsUrl,
   getStatus: () => fetchJSON<StatusResponse>("/api/status"),
+  getHealth: () => fetchJSON<HealthResponse>("/api/health"),
   /**
    * Identity probe for the dashboard auth gate (Phase 7).
    *
@@ -2117,6 +2118,28 @@ export interface ChatWorkspacesResponse {
   default_cwd: string;
   home: string;
   scan_enabled: boolean;
+}
+
+/** One subsystem entry in the {@link HealthResponse} from ``GET /api/health``. */
+export interface HealthCheck {
+  /** "up" | "ok" | "down" | "unknown". */
+  status: string;
+  state?: string | null;
+  pid?: number | null;
+  live?: number;
+  total?: number;
+  models?: number;
+  base_url?: string;
+  detail?: string;
+  error?: string;
+  updated_at?: string | null;
+}
+
+export interface HealthResponse {
+  ok: boolean;
+  /** Keyed by subsystem, e.g. "gateway", "platform:telegram", "pty_sessions",
+   * "lmstudio". Platform pollers are prefixed "platform:". */
+  checks: Record<string, HealthCheck>;
 }
 
 export interface SessionInfo {
