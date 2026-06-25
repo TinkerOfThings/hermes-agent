@@ -32,6 +32,7 @@ import { useSearchParams } from "react-router";
 
 import { ChatSidebar } from "@/components/ChatSidebar";
 import { ChatSessionList } from "@/components/ChatSessionList";
+import { ChatTranscript } from "@/components/ChatTranscript";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
@@ -244,6 +245,12 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   // with the full transcript, where native OS selection works on any range.
   // null = closed; a string = the captured transcript text.
   const [textSheet, setTextSheet] = useState<string | null>(null);
+  // The live chat's session id, learned from the PTY child's `session.info`
+  // events (the dashboard otherwise only knows it for explicitly-resumed
+  // sessions). Lets the touch sheet show a structured, selectable transcript.
+  const [liveSessionId, setLiveSessionId] = useState<string | null>(null);
+  // Flattened transcript text reported by ChatTranscript, for "Copy all".
+  const [transcriptText, setTranscriptText] = useState("");
   // NS-504: when the agent process exits cleanly (the user typed `/exit`, or
   // started a new session that ended the current PTY child), the PTY socket
   // closes with a normal code. Before this fix the terminal just printed
@@ -429,6 +436,48 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       cancelled = true;
     };
   }, [resumeParam, scopedProfile, searchParams, setSearchParams]);
+
+  // Passively learn the live session id from the PTY child's `session.info`
+  // events on this channel. A second /api/events subscriber is fine — the
+  // gateway fans out to all subscribers on the channel. Read-only: it only
+  // reads the id, never sends.
+  useEffect(() => {
+    let unmounting = false;
+    let ws: WebSocket | null = null;
+    setLiveSessionId(null);
+    void (async () => {
+      const [authName, authValue] = await buildWsAuthParam();
+      if (!authValue || unmounting) return;
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const qs = new URLSearchParams({ [authName]: authValue, channel });
+      ws = new WebSocket(
+        `${proto}//${window.location.host}${HERMES_BASE_PATH}/api/events?${qs.toString()}`,
+      );
+      ws.addEventListener("message", (ev) => {
+        let frame: { method?: string; params?: { type?: string; session_id?: string; payload?: { session_id?: string } } };
+        try {
+          frame = JSON.parse(ev.data);
+        } catch {
+          return;
+        }
+        if (frame?.method !== "event" || frame.params?.type !== "session.info") return;
+        const sid = frame.params.session_id || frame.params.payload?.session_id;
+        if (sid) setLiveSessionId(String(sid));
+      });
+    })();
+    return () => {
+      unmounting = true;
+      try {
+        ws?.close();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [channel]);
+
+  // Session id for the transcript sheet: an explicit resume wins, else the id
+  // learned live from session.info.
+  const transcriptSessionId = resumeParam || liveSessionId;
 
   useEffect(() => {
     const mql = window.matchMedia("(max-width: 1023px)");
@@ -1986,7 +2035,9 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                   type="button"
                   className="rounded border border-current/40 px-2 py-0.5 hover:border-current/70"
                   onClick={() => {
-                    const text = textSheet ?? "";
+                    const text = transcriptSessionId
+                      ? transcriptText
+                      : textSheet ?? "";
                     const fallback = () => {
                       const ta = document.createElement("textarea");
                       ta.value = text;
@@ -2021,15 +2072,25 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                   ✕
                 </button>
               </div>
-              {/* No auto-select-on-focus: it highlights the whole transcript
-                  and fights a press-and-hold range selection. Tap/long-press to
-                  place and drag your own selection; "Copy all" covers the rest. */}
-              <textarea
-                readOnly
-                value={textSheet}
-                className="min-h-0 w-full flex-1 resize-none bg-transparent px-3 pb-3 font-mono text-xs leading-relaxed text-white/90 outline-none"
-                style={{ WebkitUserSelect: "text", userSelect: "text" }}
-              />
+              {/* When the live session id is known, show a structured,
+                  selectable DOM transcript (markdown, per-message). Otherwise
+                  fall back to the raw xterm-buffer text in a textarea.
+                  No auto-select-on-focus: it fights a press-and-hold range
+                  selection; "Copy all" covers select-everything. */}
+              {transcriptSessionId ? (
+                <ChatTranscript
+                  sessionId={transcriptSessionId}
+                  profile={scopedProfile}
+                  onText={setTranscriptText}
+                />
+              ) : (
+                <textarea
+                  readOnly
+                  value={textSheet}
+                  className="min-h-0 w-full flex-1 resize-none bg-transparent px-3 pb-3 font-mono text-xs leading-relaxed text-white/90 outline-none"
+                  style={{ WebkitUserSelect: "text", userSelect: "text" }}
+                />
+              )}
             </div>
           )}
         </div>
