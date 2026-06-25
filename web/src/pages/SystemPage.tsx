@@ -43,11 +43,13 @@ import { ConfirmDialog } from "@nous-research/ui/ui/components/confirm-dialog";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { HermesConsoleModal } from "@/components/HermesConsoleModal";
+import { HealthCard } from "@/components/HealthCard";
 import { cn, themedBody } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import type {
   StatusResponse,
+  HealthResponse,
   MemoryStatus,
   MemoryProviderInfo,
   CredentialPoolProvider,
@@ -194,6 +196,7 @@ export default function SystemPage() {
   const { toast, showToast } = useToast();
 
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [memory, setMemory] = useState<MemoryStatus | null>(null);
   const [pool, setPool] = useState<CredentialPoolProvider[]>([]);
@@ -284,6 +287,25 @@ export default function SystemPage() {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  // Poll the health aggregator on a short interval so the panel stays live,
+  // independently of the heavier loadAll() admin fetches.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = () =>
+      api
+        .getHealth()
+        .then((h) => {
+          if (!cancelled) setHealth(h);
+        })
+        .catch(() => {});
+    tick();
+    const id = setInterval(tick, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
 
   // ── Gateway lifecycle ──────────────────────────────────────────────
   const runGateway = async (verb: "start" | "stop" | "restart") => {
@@ -820,6 +842,9 @@ export default function SystemPage() {
           onClose={() => setActiveAction(null)}
         />
       )}
+
+      {/* ── System health ─────────────────────────────────────────── */}
+      <HealthCard health={health} />
 
       {/* ── Host / system stats ───────────────────────────────────── */}
       <section className="flex flex-col gap-3">
