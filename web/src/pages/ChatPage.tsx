@@ -35,7 +35,7 @@ import { ChatSessionList } from "@/components/ChatSessionList";
 import { ChatTranscript } from "@/components/ChatTranscript";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { useI18n } from "@/i18n";
-import { api } from "@/lib/api";
+import { api, buildWsAuthParam, HERMES_BASE_PATH } from "@/lib/api";
 import { readStoredWorkspace, writeStoredWorkspace } from "@/lib/chat-workspaces";
 import { latchChatActivation } from "@/lib/chat-activation";
 import { readChatPanelCollapsed, toggleChatPanelCollapsed } from "@/lib/chat-panel-collapsed";
