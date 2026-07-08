@@ -57,7 +57,13 @@ class PtySession:
     async def _drain(self) -> None:
         loop = asyncio.get_running_loop()
         while True:
-            chunk = await loop.run_in_executor(None, self.bridge.read, self._read_timeout)
+            try:
+                chunk = await loop.run_in_executor(None, self.bridge.read, self._read_timeout)
+            except OSError:
+                # An unexpected read error (not the EIO/EBADF the bridge maps to
+                # EOF) would otherwise kill this task while leaving alive=True, so
+                # every future reattach returns a wedged session. Treat as EOF.
+                chunk = None
             if chunk is None:                       # EOF — the agent process exited
                 self.alive = False
                 ws = self._ws
@@ -93,10 +99,15 @@ class PtySession:
             await ws.send_bytes(snap)
 
     def detach(self, ws) -> None:
+        # Only mark the session idle if the socket detaching is still the current
+        # one. When a new socket has already superseded this one (same token, the
+        # old handler unwinding after `attach` closed it with 4409), the session is
+        # actively attached to the new socket — marking it detached/idle here let
+        # the reaper kill a live session.
         if self._ws is ws:
             self._ws = None
-        self.attached = False
-        self.last_detached_at = time.monotonic()
+            self.attached = False
+            self.last_detached_at = time.monotonic()
 
     async def close(self) -> None:
         if self._drain_task is not None:

@@ -168,6 +168,10 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Pending auto-reconnect after a transient PTY socket drop (keep-alive).
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Consecutive failed reconnect attempts → exponential backoff (reset on a
+  // successful open). Without this a server-down 1006 loops every 400ms, tearing
+  // down and recreating the whole xterm/WebGL context ~2x/sec.
+  const reconnectAttemptRef = useRef(0);
   // NS-504: when the agent process exits cleanly (the user typed `/exit`, or
   // started a new session that ended the current PTY child), the PTY socket
   // closes with a normal code. Before this fix the terminal just printed
@@ -647,6 +651,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       setBanner(null);
       setSessionEnded(false);
       // Connected — cancel any pending reconnect from a prior transient drop.
+      reconnectAttemptRef.current = 0;
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
@@ -725,12 +730,22 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       if (ev.code === 4409) {
         return;
       }
-      // Transient: reconnect by re-running the connect effect (reconnectNonce).
+      // 4400 = bad request (invalid params): reconnecting would just re-send the
+      // same bad params forever, so treat it as fatal.
+      if (ev.code === 4400) {
+        term.write(`\r\n\x1b[31m[connection rejected]\x1b[0m\r\n`);
+        setSessionEnded(true);
+        return;
+      }
+      // Transient: reconnect by re-running the connect effect (reconnectNonce),
+      // with exponential backoff capped at 15s so a server-down 1006 doesn't spin.
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      const attempt = reconnectAttemptRef.current++;
+      const delay = Math.min(400 * 2 ** attempt, 15000);
       reconnectTimerRef.current = setTimeout(() => {
         reconnectTimerRef.current = null;
         setReconnectNonce((n) => n + 1);
-      }, 400);
+      }, delay);
     };
 
     // Keystrokes → PTY.

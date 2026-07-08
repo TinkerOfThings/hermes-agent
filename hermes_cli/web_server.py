@@ -11535,8 +11535,12 @@ async def pty_ws(ws: WebSocket) -> None:
         await ws.close(code=1011)
         return
 
-    await session.attach(ws)
     try:
+        # attach() sends the buffered snapshot; keep it inside the try so a client
+        # that drops between accept and attach still triggers the finally: detach —
+        # otherwise the session leaks attached=True with a dead socket, immune to
+        # the idle reaper, pinning a registry slot + child process.
+        await session.attach(ws)
         while True:
             msg = await ws.receive()
             if msg.get("type") == "websocket.disconnect":
