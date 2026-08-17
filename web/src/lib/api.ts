@@ -337,7 +337,7 @@ function appendSessionFilters(url: string, options: SessionQueryOptions): string
 export const api = {
   buildWsUrl,
   getStatus: () => fetchJSON<StatusResponse>("/api/status"),
-  getHealth: () => fetchJSON<HealthResponse>("/api/health"),
+  getHealth: () => fetchJSON<HealthResponse>("/api/health/detail"),
   /**
    * Identity probe for the dashboard auth gate (Phase 7).
    *
@@ -1930,7 +1930,7 @@ export interface DiskPressureStatus {
   used_percent?: number | null;
 }
 
-/** One subsystem entry in the {@link HealthResponse} from ``GET /api/health``. */
+/** One subsystem entry in the {@link HealthResponse} from ``GET /api/health/detail``. */
 export interface HealthCheck {
   /** "up" | "ok" | "down" | "unknown". */
   status: string;

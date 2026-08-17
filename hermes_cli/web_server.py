@@ -4059,7 +4059,7 @@ def _lmstudio_health_check() -> Optional[dict]:
     return result
 
 
-@app.get("/api/health")
+@app.get("/api/health/detail")
 async def get_health():
     """Aggregated subsystem health for the dashboard health panel.
 
