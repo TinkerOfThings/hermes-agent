@@ -63,7 +63,7 @@ interface SessionInfo {
 
 interface RpcEnvelope {
   method?: string;
-  params?: { type?: string; payload?: unknown };
+  params?: { type?: string; payload?: unknown; session_id?: string };
 }
 
 const STATE_LABEL: Record<ConnectionState, string> = {
@@ -92,6 +92,10 @@ interface ChatSidebarProps {
   className?: string;
   onDashboardNewSessionRequest?: () => void;
   onSessionTitleChange?: (title: string | null) => void;
+  /** Live session id, read off the same ``session.info`` frames this
+   * socket already receives. Lets ChatPage show a structured transcript
+   * without opening a second /api/events subscriber. */
+  onLiveSessionIdChange?: (sessionId: string) => void;
 }
 
 /** Build the ``session.create`` params for the sidecar session.
@@ -115,6 +119,7 @@ export function ChatSidebar({
   className,
   onDashboardNewSessionRequest,
   onSessionTitleChange,
+  onLiveSessionIdChange,
 }: ChatSidebarProps) {
   // `version` bumps on reconnect; gw is derived so we never call setState
   // for it inside an effect (React 19's set-state-in-effect rule). The
@@ -410,6 +415,12 @@ export function ChatSidebar({
           const title = titleFromSessionInfoPayload(payload);
           if (title !== undefined) {
             onSessionTitleChange?.(title);
+          }
+          const sid =
+            frame.params.session_id ||
+            (payload as { session_id?: string } | null)?.session_id;
+          if (sid) {
+            onLiveSessionIdChange?.(String(sid));
           }
         } else if (type === "dashboard.new_session_requested") {
           onDashboardNewSessionRequest?.();

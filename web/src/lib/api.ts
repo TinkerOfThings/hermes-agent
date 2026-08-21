@@ -337,7 +337,8 @@ function appendSessionFilters(url: string, options: SessionQueryOptions): string
 export const api = {
   buildWsUrl,
   getStatus: () => fetchJSON<StatusResponse>("/api/status"),
-  getHealth: () => fetchJSON<HealthResponse>("/api/health"),
+  getHealth: async (): Promise<HealthResponse> =>
+    healthFromStatus(await fetchJSON<StatusResponse>("/api/status")),
   /**
    * Identity probe for the dashboard auth gate (Phase 7).
    *
@@ -1928,6 +1929,47 @@ export interface DiskPressureStatus {
   total_mb?: number | null;
   free_mb?: number | null;
   used_percent?: number | null;
+}
+
+/** Adapt upstream ``GET /api/status`` into the {@link HealthResponse} shape.
+ *
+ * We used to serve a bespoke aggregator at ``/api/health``; upstream now owns
+ * that route as a 3-field liveness probe and covers gateway + per-platform
+ * poller state on ``/api/status`` (with writer-identity and freshness
+ * filtering our version never had). Mapping client-side keeps this fork's
+ * divergence entirely in the frontend — there is no patched Python left to
+ * collide with a future ``hermes update``.
+ *
+ * Not represented here, because upstream exposes them on no endpoint: PTY
+ * session counts and LM Studio reachability.
+ */
+export function healthFromStatus(status: StatusResponse): HealthResponse {
+  const checks: Record<string, HealthCheck> = {};
+
+  checks.gateway = {
+    status: status.gateway_running ? "up" : "down",
+    pid: status.gateway_pid,
+    state: status.gateway_state,
+    detail: status.gateway_exit_reason ?? undefined,
+  };
+
+  for (const [name, rec] of Object.entries(status.gateway_platforms ?? {})) {
+    const state = String(rec?.state ?? "").toLowerCase();
+    checks[`platform:${name}`] = {
+      status:
+        state === "connected"
+          ? "up"
+          : state === "disconnected" || state === "fatal"
+            ? "down"
+            : "unknown",
+      state: rec?.state,
+      updated_at: rec?.updated_at,
+      error: rec?.error_message,
+    };
+  }
+
+  const ok = Object.values(checks).every((c) => c.status !== "down");
+  return { ok, checks };
 }
 
 /** One subsystem entry in the {@link HealthResponse} from ``GET /api/health``. */

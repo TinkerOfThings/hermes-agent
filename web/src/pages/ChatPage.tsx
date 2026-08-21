@@ -35,7 +35,7 @@ import { ChatSessionList } from "@/components/ChatSessionList";
 import { ChatTranscript } from "@/components/ChatTranscript";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { useI18n } from "@/i18n";
-import { api, buildWsAuthParam, HERMES_BASE_PATH } from "@/lib/api";
+import { api } from "@/lib/api";
 import { latchChatActivation } from "@/lib/chat-activation";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { normalizeSessionTitle } from "@/lib/chat-title";
@@ -248,7 +248,12 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   // The live chat's session id, learned from the PTY child's `session.info`
   // events (the dashboard otherwise only knows it for explicitly-resumed
   // sessions). Lets the touch sheet show a structured, selectable transcript.
-  const [liveSessionId, setLiveSessionId] = useState<string | null>(null);
+  // Tagged with the channel it was learned on, so switching channels
+  // invalidates it by derivation rather than by a reset effect.
+  const [liveSession, setLiveSession] = useState<{
+    channel: string;
+    id: string;
+  } | null>(null);
   // Flattened transcript text reported by ChatTranscript, for "Copy all".
   const [transcriptText, setTranscriptText] = useState("");
   // NS-504: when the agent process exits cleanly (the user typed `/exit`, or
@@ -437,43 +442,15 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     };
   }, [resumeParam, scopedProfile, searchParams, setSearchParams]);
 
-  // Passively learn the live session id from the PTY child's `session.info`
-  // events on this channel. A second /api/events subscriber is fine — the
-  // gateway fans out to all subscribers on the channel. Read-only: it only
-  // reads the id, never sends.
-  useEffect(() => {
-    let unmounting = false;
-    let ws: WebSocket | null = null;
-    setLiveSessionId(null);
-    void (async () => {
-      const [authName, authValue] = await buildWsAuthParam();
-      if (!authValue || unmounting) return;
-      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const qs = new URLSearchParams({ [authName]: authValue, channel });
-      ws = new WebSocket(
-        `${proto}//${window.location.host}${HERMES_BASE_PATH}/api/events?${qs.toString()}`,
-      );
-      ws.addEventListener("message", (ev) => {
-        let frame: { method?: string; params?: { type?: string; session_id?: string; payload?: { session_id?: string } } };
-        try {
-          frame = JSON.parse(ev.data);
-        } catch {
-          return;
-        }
-        if (frame?.method !== "event" || frame.params?.type !== "session.info") return;
-        const sid = frame.params.session_id || frame.params.payload?.session_id;
-        if (sid) setLiveSessionId(String(sid));
-      });
-    })();
-    return () => {
-      unmounting = true;
-      try {
-        ws?.close();
-      } catch {
-        /* ignore */
-      }
-    };
-  }, [channel]);
+  // The live chat's session id arrives via ChatSidebar's existing
+  // /api/events subscriber (see onLiveSessionIdChange). This page used to
+  // open a second subscriber of its own; that was a redundant socket on the
+  // same channel, so it reads off the sidebar's instead.
+  const handleLiveSessionId = useCallback(
+    (id: string) => setLiveSession({ channel, id }),
+    [channel],
+  );
+  const liveSessionId = liveSession?.channel === channel ? liveSession.id : null;
 
   // Session id for the transcript sheet: an explicit resume wins, else the id
   // learned live from session.info.
@@ -1878,6 +1855,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                 profile={scopedProfile}
                 onDashboardNewSessionRequest={startFreshDashboardChat}
                 onSessionTitleChange={handleSessionTitleChange}
+                onLiveSessionIdChange={handleLiveSessionId}
               />
             </div>
             <ChatSessionList
@@ -2038,25 +2016,11 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                     const text = transcriptSessionId
                       ? transcriptText
                       : textSheet ?? "";
-                    const fallback = () => {
-                      const ta = document.createElement("textarea");
-                      ta.value = text;
-                      ta.style.position = "fixed";
-                      ta.style.opacity = "0";
-                      document.body.appendChild(ta);
-                      ta.select();
-                      try {
-                        document.execCommand("copy");
-                      } catch {
-                        /* best effort */
-                      }
-                      document.body.removeChild(ta);
-                    };
-                    if (navigator.clipboard?.writeText) {
-                      navigator.clipboard.writeText(text).catch(fallback);
-                    } else {
-                      fallback();
-                    }
+                    // copyTextToClipboard already implements the
+                    // selection-based textarea fallback this used to
+                    // hand-roll, and is the only sanctioned write path
+                    // (enforced by clipboard-usage.test.ts).
+                    void copyTextToClipboard(text);
                     setTextSheet(null);
                   }}
                 >
@@ -2121,6 +2085,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                 profile={scopedProfile}
                 onDashboardNewSessionRequest={startFreshDashboardChat}
                 onSessionTitleChange={handleSessionTitleChange}
+                onLiveSessionIdChange={handleLiveSessionId}
               />
             </div>
 
