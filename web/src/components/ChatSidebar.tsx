@@ -114,6 +114,10 @@ interface ChatSidebarProps {
   className?: string
   onDashboardNewSessionRequest?: () => void
   onSessionTitleChange?: (title: string | null) => void
+  /** Live session id, read off the same ``session.info`` frames this
+   * socket already receives. Lets ChatPage show a structured transcript
+   * without opening a second /api/events subscriber. */
+  onLiveSessionIdChange?: (sessionId: string) => void
 }
 
 /** Build the ``session.create`` params for the sidecar session.
@@ -136,7 +140,8 @@ export function ChatSidebar({
   profile,
   className,
   onDashboardNewSessionRequest,
-  onSessionTitleChange
+  onSessionTitleChange,
+  onLiveSessionIdChange,
 }: ChatSidebarProps) {
   const navigate = useNavigate()
   // `version` bumps on reconnect (manual button, profile/channel switch) and
@@ -492,6 +497,12 @@ export function ChatSidebar({
       const model = sessionInfoModel(ev.payload)
       if (model !== undefined) {
         setRuntimeModel(model)
+      }
+      // Fork-local: the live PTY session id rides the same frames, so the
+      // mobile transcript sheet needs no second /api/events subscriber.
+      const sid = ev.session_id ?? (ev.payload as { session_id?: string } | null)?.session_id
+      if (sid) {
+        onLiveSessionIdChange?.(String(sid))
       }
     })
     const offNewSession = feed.on('dashboard.new_session_requested', () => {
