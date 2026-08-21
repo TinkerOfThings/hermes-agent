@@ -500,9 +500,13 @@ export function ChatSidebar({
       }
       // Fork-local: the live PTY session id rides the same frames, so the
       // mobile transcript sheet needs no second /api/events subscriber.
-      const sid = ev.session_id ?? (ev.payload as { session_id?: string } | null)?.session_id
-      if (sid) {
-        onLiveSessionIdChange?.(String(sid))
+      // Must be the PERSISTED id: the sheet fetches /api/sessions/<id>/messages,
+      // which reads the session store. The envelope's session_id is the
+      // gateway's RUNTIME sid and 404s there; a session with no persisted row
+      // yet reports nothing, so the sheet falls back to the raw buffer.
+      const storedId = (ev.payload as { stored_session_id?: string } | null)?.stored_session_id
+      if (storedId) {
+        onLiveSessionIdChange?.(String(storedId))
       }
     })
     const offNewSession = feed.on('dashboard.new_session_requested', () => {
