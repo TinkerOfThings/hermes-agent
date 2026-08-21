@@ -453,3 +453,61 @@ describe("ChatSidebar event socket reconnect", () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 });
+
+describe("ChatSidebar live session id", () => {
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    apiMocks.buildWsUrl.mockResolvedValue(
+      "ws://localhost/api/events?channel=chat-1",
+    );
+  });
+
+  async function renderWith(onLiveSessionIdChange: (id: string) => void) {
+    const { ChatSidebar } = await import("./ChatSidebar");
+    await render(
+      <ChatSidebar
+        channel="chat-1"
+        onLiveSessionIdChange={onLiveSessionIdChange}
+      />,
+    );
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    return FakeWebSocket.instances[0];
+  }
+
+  function sessionInfoFrame(payload: Record<string, unknown>) {
+    return {
+      data: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "event",
+        params: { type: "session.info", session_id: "runtime-sid", payload },
+      }),
+    };
+  }
+
+  it("reports the persisted stored_session_id, not the runtime sid", async () => {
+    // /api/sessions/<id>/messages reads the persisted store, so the runtime
+    // session_id on the frame envelope 404s. Only stored_session_id is
+    // fetchable.
+    const onLiveSessionIdChange = vi.fn();
+    const socket = await renderWith(onLiveSessionIdChange);
+
+    socket.emit(
+      "message",
+      sessionInfoFrame({ title: "t", stored_session_id: "persisted-123" }),
+    );
+
+    expect(onLiveSessionIdChange).toHaveBeenCalledWith("persisted-123");
+    expect(onLiveSessionIdChange).not.toHaveBeenCalledWith("runtime-sid");
+  });
+
+  it("reports nothing when the frame carries no persisted id", async () => {
+    // A session with no persisted row yet must not produce a 404-ing id.
+    const onLiveSessionIdChange = vi.fn();
+    const socket = await renderWith(onLiveSessionIdChange);
+
+    socket.emit("message", sessionInfoFrame({ title: "t" }));
+    socket.emit("message", sessionInfoFrame({ title: "t", stored_session_id: "" }));
+
+    expect(onLiveSessionIdChange).not.toHaveBeenCalled();
+  });
+});

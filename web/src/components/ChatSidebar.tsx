@@ -63,7 +63,7 @@ interface SessionInfo {
 
 interface RpcEnvelope {
   method?: string;
-  params?: { type?: string; payload?: unknown; session_id?: string };
+  params?: { type?: string; payload?: unknown };
 }
 
 const STATE_LABEL: Record<ConnectionState, string> = {
@@ -416,11 +416,14 @@ export function ChatSidebar({
           if (title !== undefined) {
             onSessionTitleChange?.(title);
           }
-          const sid =
-            frame.params.session_id ||
-            (payload as { session_id?: string } | null)?.session_id;
-          if (sid) {
-            onLiveSessionIdChange?.(String(sid));
+          // Must be the PERSISTED id: the transcript sheet fetches
+          // /api/sessions/<id>/messages, which reads the session store. The
+          // envelope's params.session_id is the gateway's RUNTIME sid and
+          // 404s there. A session with no persisted row yet reports nothing.
+          const storedId = (payload as { stored_session_id?: string } | null)
+            ?.stored_session_id;
+          if (storedId) {
+            onLiveSessionIdChange?.(String(storedId));
           }
         } else if (type === "dashboard.new_session_requested") {
           onDashboardNewSessionRequest?.();
