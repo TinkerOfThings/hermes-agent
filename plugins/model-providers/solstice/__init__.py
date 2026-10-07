@@ -16,7 +16,10 @@ from providers import register_provider
 from providers.base import ProviderProfile
 
 from .auth import broker_token_request, discover_client
-from .transport import INFERENCE_BASE_URL, SolsticeClient
+
+# Lives here, not in .transport: the transport pulls in httpx at import time, which the minimal
+# runtime `hermes update` runs under does not have, so the client is imported on first use instead.
+INFERENCE_BASE_URL = "https://generativelanguage.googleapis.com/v1alpha"
 
 # Verified on the per-user-quota endpoint, which has no model listing a user token may read (its
 # /models answers 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT). Quota is per model, so lite stays last as the
@@ -43,6 +46,8 @@ def _auth_handler(action: str, args: Any) -> bool:
 
 class SolsticeProfile(ProviderProfile):
     def create_client(self, **client_kwargs: Any) -> Any:
+        from .transport import SolsticeClient
+
         allowed = {"api_key", "base_url", "default_headers", "timeout", "http_client"}
         return SolsticeClient(**{k: v for k, v in client_kwargs.items() if k in allowed})
 
