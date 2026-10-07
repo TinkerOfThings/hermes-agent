@@ -60,7 +60,7 @@ async def test_health_probes_lmstudio_when_active(monkeypatch):
         "model": {"provider": "lmstudio", "base_url": "http://127.0.0.1:1234/v1"},
     })
     ws._LMSTUDIO_HEALTH_CACHE = {"at": 0.0, "value": None}  # fresh, no stale cache
-    import hermes_cli.models as models
+    import hermes_cli.models_local as models
     monkeypatch.setattr(models, "probe_lmstudio_models", lambda **k: ["m1", "m2"])
 
     body = await ws.get_health()

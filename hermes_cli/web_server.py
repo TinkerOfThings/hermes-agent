@@ -1096,7 +1096,7 @@ def _lmstudio_health_check() -> Optional[dict]:
         or "http://127.0.0.1:1234/v1"
     )
     try:
-        from hermes_cli.models import probe_lmstudio_models
+        from hermes_cli.models_local import probe_lmstudio_models
 
         models = probe_lmstudio_models(
             api_key=os.environ.get("LM_API_KEY") or "", base_url=base, timeout=1.5
