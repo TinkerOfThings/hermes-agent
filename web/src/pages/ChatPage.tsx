@@ -207,7 +207,6 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   // Covers the blank terminal + blinking-cursor window so users don't think
   // chat is broken; clears as soon as there is something to show.
   const [resumeHydrating, setResumeHydrating] = useState(false);
-  const [lastCloseCode, setLastCloseCode] = useState<number | null>(null);
   // Touch copy: on a phone the inner Ink TUI runs xterm in mouse-events mode,
   // so a press-and-hold can only word-select and never drag-extends — leaving
   // you stranded on one word. A long-press instead opens this read-only sheet

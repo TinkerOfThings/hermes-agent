@@ -39,30 +39,38 @@ export function ChatTranscript({
   profile,
   onText,
 }: ChatTranscriptProps) {
-  const [messages, setMessages] = useState<SessionMessage[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Request identity doubles as the "loaded yet?" marker: a state entry whose
+  // key does not match the current props is a fetch still in flight, so the
+  // reset happens by derivation instead of a synchronous setState in the
+  // effect (react-hooks/set-state-in-effect).
+  const key = `${profile ?? ""}\u0000${sessionId}`;
+  const [loaded, setLoaded] = useState<{
+    key: string;
+    messages: SessionMessage[];
+    error: string | null;
+  } | null>(null);
+  const messages = loaded?.key === key ? loaded.messages : null;
+  const error = loaded?.key === key ? loaded.error : null;
 
   useEffect(() => {
     let cancelled = false;
-    setMessages(null);
-    setError(null);
     api
       .getSessionMessages(sessionId, profile)
       .then((r) => {
         if (cancelled) return;
         const msgs = r.messages || [];
-        setMessages(msgs);
+        setLoaded({ key, messages: msgs, error: null });
         onText?.(plainText(msgs));
       })
       .catch((e) => {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setLoaded({ key, messages: [], error: String(e) });
       });
     return () => {
       cancelled = true;
     };
     // onText is a setter from the parent — stable; excluded to avoid refetch loops.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, profile]);
+  }, [sessionId, profile, key]);
 
   if (error) {
     return (

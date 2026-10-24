@@ -531,7 +531,7 @@ export function ChatSidebar({
       offNewSession()
       feed.close()
     }
-  }, [channel, feed, onDashboardNewSessionRequest, onSessionTitleChange, version])
+  }, [channel, feed, onDashboardNewSessionRequest, onLiveSessionIdChange, onSessionTitleChange, version])
 
   // Seed the badge on mount and re-read it whenever the sockets are rebuilt
   // (a profile/channel switch bumps `version`).
